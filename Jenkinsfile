@@ -30,13 +30,13 @@ pipeline {
                     
                     if (env.BRANCH_NAME == 'dev') {
                         env.DEPLOY_ENV = 'dev'
-                        env.KUBECONFIG_CRED_ID = 'kubeconfig-dev'
+                        env.KUBECONFIG_CRED_ID = 'kubeconfig-k8s'
                     } else if (env.BRANCH_NAME == 'stage') {
                         env.DEPLOY_ENV = 'stage'
-                        env.KUBECONFIG_CRED_ID = 'kubeconfig-stage'
+                        env.KUBECONFIG_CRED_ID = 'kubeconfig-k8s'
                     } else if (env.BRANCH_NAME == 'prod' || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
                         env.DEPLOY_ENV = 'prod'
-                        env.KUBECONFIG_CRED_ID = 'kubeconfig-prod'
+                        env.KUBECONFIG_CRED_ID = 'kubeconfig-k8s'
                     } else {
                         echo "⚠️ Feature branch detected (${env.BRANCH_NAME}). Pipeline will build & test without deploying."
                         env.DEPLOY_ENV = 'none'
@@ -151,6 +151,9 @@ pipeline {
                         sh """
                             export KUBECONFIG=\${KUBECONFIG_FILE}
                             
+                            echo "Ensuring namespace ${env.DEPLOY_ENV} exists..."
+                            kubectl create namespace ${env.DEPLOY_ENV} --dry-run=client -o yaml | kubectl apply -f -
+                            
                             echo "Updating Kustomize image tags..."
                             cd k8s/overlays/${env.DEPLOY_ENV}
                             
@@ -161,12 +164,12 @@ pipeline {
                             kubectl apply -k .
                             
                             echo "Waiting for rollout to complete..."
-                            kubectl rollout status deployment/${env.DEPLOY_ENV}-backend-deployment --timeout=120s
-                            kubectl rollout status deployment/${env.DEPLOY_ENV}-frontend-deployment --timeout=120s
+                            kubectl rollout status deployment/backend -n ${env.DEPLOY_ENV} --timeout=120s
+                            kubectl rollout status deployment/frontend -n ${env.DEPLOY_ENV} --timeout=120s
                             
-                            echo "Fetching Ingress details..."
-                            kubectl get ingress
-                            kubectl get pods -o wide
+                            echo "Fetching Pods & Ingress details..."
+                            kubectl get pods -n ${env.DEPLOY_ENV} -o wide
+                            kubectl get ingress -n ${env.DEPLOY_ENV}
                         """
                     }
                 }
