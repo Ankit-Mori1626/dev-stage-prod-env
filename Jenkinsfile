@@ -34,7 +34,7 @@ pipeline {
                     } else if (env.BRANCH_NAME == 'stage') {
                         env.DEPLOY_ENV = 'stage'
                         env.KUBECONFIG_CRED_ID = 'kubeconfig-stage'
-                    } else if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
+                    } else if (env.BRANCH_NAME == 'prod' || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
                         env.DEPLOY_ENV = 'prod'
                         env.KUBECONFIG_CRED_ID = 'kubeconfig-prod'
                     } else {
