@@ -52,7 +52,12 @@ pipeline {
                         dir('backend') {
                             sh '''
                                 echo "Running Backend health check tests..."
-                                node -e "console.log('Backend syntax check passed')"
+                                test -f package.json && test -f src/server.js && echo "Backend files verified"
+                                if command -v node >/dev/null 2>&1; then
+                                    node -e "console.log('Backend syntax check passed')"
+                                else
+                                    echo "Node.js not installed on agent, skipped Node runtime syntax check."
+                                fi
                             '''
                         }
                     }
