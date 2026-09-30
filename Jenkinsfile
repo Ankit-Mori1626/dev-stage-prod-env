@@ -30,13 +30,13 @@ pipeline {
                     
                     if (env.BRANCH_NAME == 'dev') {
                         env.DEPLOY_ENV = 'dev'
-                        env.KUBECONFIG_CRED_ID = 'kubeconfig-k8s'
+                        env.KUBECONFIG_CRED_ID = 'kubeconfig-dev'
                     } else if (env.BRANCH_NAME == 'stage') {
                         env.DEPLOY_ENV = 'stage'
-                        env.KUBECONFIG_CRED_ID = 'kubeconfig-k8s'
+                        env.KUBECONFIG_CRED_ID = 'kubeconfig-stage'
                     } else if (env.BRANCH_NAME == 'prod' || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'master') {
                         env.DEPLOY_ENV = 'prod'
-                        env.KUBECONFIG_CRED_ID = 'kubeconfig-k8s'
+                        env.KUBECONFIG_CRED_ID = 'kubeconfig-prod'
                     } else {
                         echo "⚠️ Feature branch detected (${env.BRANCH_NAME}). Pipeline will build & test without deploying."
                         env.DEPLOY_ENV = 'none'
