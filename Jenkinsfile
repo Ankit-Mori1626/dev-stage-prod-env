@@ -5,7 +5,7 @@ pipeline {
         DOCKER_REGISTRY      = "docker.io/ankitmori1626" // Change to your Docker Hub / Harbor namespace
         BACKEND_IMAGE_NAME   = "threetier-backend"
         FRONTEND_IMAGE_NAME  = "threetier-frontend"
-        REGISTRY_CREDENTIALS = "dockerhub-credentials"  // Jenkins Credential ID (Username/Password)
+        REGISTRY_CREDENTIALS = "dockerhub-pat"  // Jenkins Credential ID (Username/Password)
         BUILD_TAG            = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
         SCAN_SEVERITY        = "HIGH,CRITICAL"
     }
