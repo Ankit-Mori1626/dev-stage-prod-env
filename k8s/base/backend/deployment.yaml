@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: ankitmori1626/threetier-backend:latest
+        image: threetier-backend
         imagePullPolicy: Always
         ports:
         - containerPort: 5000
