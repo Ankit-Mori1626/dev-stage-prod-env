@@ -1,5 +1,7 @@
 const { Pool } = require('pg');
 
+const useSSL = process.env.DB_SSL === 'true' || (process.env.DB_HOST && process.env.DB_HOST !== 'localhost');
+
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
@@ -8,7 +10,8 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'threetierdb',
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 5000,
+  ssl: useSSL ? { rejectUnauthorized: false } : false,
 });
 
 // Auto-initialize DB table if not exists with retry
