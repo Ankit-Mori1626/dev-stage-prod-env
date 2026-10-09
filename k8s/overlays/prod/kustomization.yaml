@@ -10,3 +10,4 @@ patchesStrategicMerge:
   - ingress-patch.yaml
   - replica-patch.yaml
   - nodeselector-patch.yaml
+  - secret-patch.yaml
