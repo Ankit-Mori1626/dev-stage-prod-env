@@ -9,3 +9,4 @@ bases:
 patchesStrategicMerge:
   - ingress-patch.yaml
   - nodeselector-patch.yaml
+  - secret-patch.yaml
