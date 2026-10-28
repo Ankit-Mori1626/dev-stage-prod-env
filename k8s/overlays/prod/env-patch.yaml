@@ -10,6 +10,8 @@ spec:
         env:
         - name: APP_ENV
           value: "prod"
+        - name: BACKEND_URL
+          value: "http://backend-service.prod.svc.cluster.local:5000"
 ---
 apiVersion: apps/v1
 kind: Deployment

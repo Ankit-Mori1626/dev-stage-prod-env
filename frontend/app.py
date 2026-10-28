@@ -140,16 +140,25 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Backend API Configuration ---
-BACKEND_URL = os.getenv("BACKEND_URL", "http://backend-service:5000").rstrip("/")
-TASKS_API = f"{BACKEND_URL}/api/tasks"
-JOBS_API = f"{BACKEND_URL}/api/jobs"
-APPLICATIONS_API = f"{BACKEND_URL}/api/applications"
-INQUIRIES_API = f"{BACKEND_URL}/api/inquiries"
-HEALTH_API = f"{BACKEND_URL}/ready"
-LIVENESS_API = f"{BACKEND_URL}/healthz"
-METRICS_API = f"{BACKEND_URL}/metrics"
-INGRESS_INFO_API = f"{BACKEND_URL}/api/ingress-info"
+# --- Backend API Configuration & Discovery ---
+def get_candidate_backend_urls():
+    candidates = []
+    env_backend = os.getenv("BACKEND_URL")
+    if env_backend:
+        candidates.append(env_backend.rstrip("/"))
+    for c in [
+        f"http://backend-service.{APP_ENV}.svc.cluster.local:5000",
+        "http://backend-service:5000",
+        "http://backend:5000",
+        "http://127.0.0.1:5000",
+        "http://localhost:5000"
+    ]:
+        if c not in candidates:
+            candidates.append(c)
+    return candidates
+
+BACKEND_CANDIDATES = get_candidate_backend_urls()
+BACKEND_URL = BACKEND_CANDIDATES[0]
 
 # Session State Initialization for Admin Authentication
 if "is_admin_authenticated" not in st.session_state:
@@ -405,65 +414,87 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # --- Backend Communication Helpers ---
-@st.cache_data(ttl=3)
+def get_active_url():
+    return st.session_state.get("active_backend_url", BACKEND_URL)
+
+@st.cache_data(ttl=30, show_spinner=False)
 def get_backend_health():
+    last_err = "No connection"
+    for candidate in BACKEND_CANDIDATES:
+        try:
+            t0 = time.time()
+            res = requests.get(f"{candidate}/ready", timeout=2)
+            latency = round((time.time() - t0) * 1000, 2)
+            if res.status_code == 200:
+                data = res.json()
+                data["latency_ms"] = latency
+                data["active_url"] = candidate
+                return data
+            elif res.status_code in [500, 502, 503]:
+                return {"status": "UNHEALTHY", "error": f"HTTP {res.status_code}", "latency_ms": latency, "active_url": candidate}
+        except Exception as e:
+            last_err = str(e)
+    return {"status": "OFFLINE", "error": last_err, "latency_ms": 0, "active_url": BACKEND_CANDIDATES[0]}
+
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_jobs(base_url=None):
+    url = (base_url or get_active_url()).rstrip("/")
     try:
-        t0 = time.time()
-        res = requests.get(HEALTH_API, timeout=3)
-        latency = round((time.time() - t0) * 1000, 2)
+        res = requests.get(f"{url}/api/jobs", timeout=3)
         if res.status_code == 200:
             data = res.json()
-            data["latency_ms"] = latency
-            return data
-        return {"status": "UNHEALTHY", "error": f"HTTP {res.status_code}", "latency_ms": latency}
-    except Exception as e:
-        return {"status": "OFFLINE", "error": str(e), "latency_ms": 0}
-
-@st.cache_data(ttl=2)
-def fetch_jobs():
-    try:
-        res = requests.get(JOBS_API, timeout=4)
-        if res.status_code == 200:
-            return res.json().get("data", [])
+            if isinstance(data, dict):
+                return data.get("data", [])
+            elif isinstance(data, list):
+                return data
         return []
     except Exception:
         return []
 
-@st.cache_data(ttl=2)
-def fetch_tasks():
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_tasks(base_url=None):
+    url = (base_url or get_active_url()).rstrip("/")
     try:
-        res = requests.get(TASKS_API, timeout=4)
+        res = requests.get(f"{url}/api/tasks", timeout=3)
         if res.status_code == 200:
-            return res.json()
+            data = res.json()
+            if isinstance(data, dict):
+                return data
+            elif isinstance(data, list):
+                return {"data": data, "environment": CFG["env_name"], "node_name": "local", "pod_name": "standalone"}
         return {"data": [], "environment": CFG["env_name"], "node_name": "local", "pod_name": "standalone"}
     except Exception:
         return {"data": [], "environment": CFG["env_name"], "node_name": "local", "pod_name": "standalone"}
 
-def submit_application(payload):
+def submit_application(payload, base_url=None):
+    url = (base_url or get_active_url()).rstrip("/")
     try:
-        res = requests.post(APPLICATIONS_API, json=payload, timeout=5)
+        res = requests.post(f"{url}/api/applications", json=payload, timeout=5)
         return res.status_code in [200, 201]
     except Exception:
         return False
 
-def submit_inquiry(payload):
+def submit_inquiry(payload, base_url=None):
+    url = (base_url or get_active_url()).rstrip("/")
     try:
-        res = requests.post(INQUIRIES_API, json=payload, timeout=5)
+        res = requests.post(f"{url}/api/inquiries", json=payload, timeout=5)
         return res.status_code in [200, 201]
     except Exception:
         return False
 
-def fetch_admin_data(endpoint, token):
+def fetch_admin_data(endpoint, token, base_url=None):
+    url = (base_url or get_active_url()).rstrip("/")
     try:
         headers = {"x-admin-token": token}
-        res = requests.get(f"{BACKEND_URL}/api/{endpoint}", headers=headers, timeout=4)
+        res = requests.get(f"{url}/api/{endpoint}", headers=headers, timeout=4)
         if res.status_code == 200:
             return res.json().get("data", [])
         return []
     except Exception:
         return []
 
-def create_task(title, description, priority, status):
+def create_task(title, description, priority, status, base_url=None):
+    url = (base_url or get_active_url()).rstrip("/")
     try:
         payload = {
             "title": title,
@@ -471,7 +502,7 @@ def create_task(title, description, priority, status):
             "priority": priority,
             "status": status
         }
-        res = requests.post(TASKS_API, json=payload, timeout=4)
+        res = requests.post(f"{url}/api/tasks", json=payload, timeout=4)
         return res.status_code in [200, 201]
     except Exception as e:
         st.error(f"Error creating task: {e}")
@@ -479,9 +510,14 @@ def create_task(title, description, priority, status):
 
 # --- Fetch Initial Data ---
 health_data = get_backend_health()
-tasks_response = fetch_tasks()
+active_backend_url = health_data.get("active_url", BACKEND_URL)
+st.session_state["active_backend_url"] = active_backend_url
+
+tasks_response = fetch_tasks(active_backend_url)
+if not isinstance(tasks_response, dict):
+    tasks_response = {"data": [], "environment": CFG["env_name"], "node_name": "local", "pod_name": "standalone"}
 tasks_list = tasks_response.get("data", [])
-jobs_list = fetch_jobs()
+jobs_list = fetch_jobs(active_backend_url)
 
 # Environment & Pod Telemetry
 reported_env = tasks_response.get("environment", health_data.get("environment", CFG["env_name"])).upper()
@@ -512,7 +548,10 @@ with st.sidebar:
     if health_data.get("status") == "READY":
         st.success(f"🟢 **API & DB**: READY ({health_data.get('latency_ms')} ms)")
     else:
+        err_msg = health_data.get("error", "No connection")
         st.error("🔴 **Backend API**: Offline")
+        st.caption(f"⚠️ *{err_msg}*")
+        st.caption(f"Endpoint: `{active_backend_url}`")
 
     st.markdown("---")
     st.subheader("🛡️ Ingress Routes")
@@ -565,9 +604,10 @@ with st.expander(f"🔬 {CFG['env_name']} Debug Panel — Real-time Cluster Info
     🏷️  Environment    : {reported_env}<br>
     🖥️  Pod Name       : {pod_name}<br>
     🗂️  Node           : {node_name}<br>
-    🔗 Backend URL    : {BACKEND_URL}<br>
+    🔗 Active Backend : {active_backend_url}<br>
     🕐 Render Time    : {build_time}<br>
     📶 API Status     : {health_data.get('status', 'UNKNOWN')}<br>
+    ⚠️ Error Message  : {health_data.get('error', 'None')}<br>
     ⚡ API Latency    : {health_data.get('latency_ms', 0)} ms<br>
     📦 Tasks in DB    : {len(tasks_list)}<br>
     💼 Jobs in DB     : {len(jobs_list)}<br>
