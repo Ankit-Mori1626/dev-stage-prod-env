@@ -21,3 +21,17 @@ spec:
             name: backend-service
             port:
               number: 5000
+      - path: /ready
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-service
+            port:
+              number: 5000
+      - path: /healthz
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-service
+            port:
+              number: 5000

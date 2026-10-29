@@ -40,13 +40,13 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api', jobRoutes);
 app.use('/api', inquiryRoutes);
 
-// Liveness Probe Endpoint
-app.get('/healthz', (req, res) => {
+// Liveness Probe Endpoint (supports both direct and Ingress /api path)
+app.get(['/healthz', '/api/healthz'], (req, res) => {
   res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
 });
 
 // Readiness Probe Endpoint (checks DB connectivity)
-app.get('/ready', async (req, res) => {
+app.get(['/ready', '/api/ready'], async (req, res) => {
   try {
     await pool.query('SELECT 1');
     res.status(200).json({ 

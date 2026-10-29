@@ -143,18 +143,49 @@ st.set_page_config(
 # --- Backend API Configuration & Discovery ---
 def get_candidate_backend_urls():
     candidates = []
-    env_backend = os.getenv("BACKEND_URL")
-    if env_backend:
-        candidates.append(env_backend.rstrip("/"))
+    
+    # 1. Direct ClusterIP via K8s Environment Variables (0ms DNS, bypasses CoreDNS entirely)
+    k8s_svc_host = os.getenv("BACKEND_SERVICE_SERVICE_HOST")
+    k8s_svc_port = os.getenv("BACKEND_SERVICE_SERVICE_PORT", "5000")
+    if k8s_svc_host:
+        candidates.append(f"http://{k8s_svc_host}:{k8s_svc_port}")
+        
+    # 2. In-namespace short names (CoreDNS resolves in <1ms via 1st search domain dev.svc.cluster.local)
     for c in [
-        f"http://backend-service.{APP_ENV}.svc.cluster.local:5000",
         "http://backend-service:5000",
-        "http://backend:5000",
-        "http://127.0.0.1:5000",
-        "http://localhost:5000"
+        "http://backend:5000"
     ]:
         if c not in candidates:
             candidates.append(c)
+
+    # 3. Explicitly configured BACKEND_URL (auto-fix trailing dot for cluster.local FQDNs)
+    env_backend = os.getenv("BACKEND_URL")
+    if env_backend:
+        b_clean = env_backend.rstrip("/")
+        # Fix ndots:5 latency: if domain has cluster.local without trailing dot, add trailing dot
+        if "cluster.local:5000" in b_clean and "cluster.local.:5000" not in b_clean:
+            b_dot = b_clean.replace("cluster.local:5000", "cluster.local.:5000")
+            if b_dot not in candidates:
+                candidates.append(b_dot)
+        if b_clean not in candidates:
+            candidates.append(b_clean)
+        
+    # 4. FQDN with trailing dot (prevents ndots:5 search domain fallback to upstream AWS VPC DNS)
+    fqdn_dot = f"http://backend-service.{APP_ENV}.svc.cluster.local.:5000"
+    if fqdn_dot not in candidates:
+        candidates.append(fqdn_dot)
+            
+    # 5. Localhost fallback ONLY when strictly outside Kubernetes
+    is_in_k8s = bool(
+        k8s_svc_host
+        or os.getenv("KUBERNETES_SERVICE_HOST")
+        or os.path.exists("/var/run/secrets/kubernetes.io/serviceaccount")
+    )
+    if not is_in_k8s:
+        for c in ["http://127.0.0.1:5000", "http://localhost:5000"]:
+            if c not in candidates:
+                candidates.append(c)
+                
     return candidates
 
 BACKEND_CANDIDATES = get_candidate_backend_urls()
@@ -419,11 +450,22 @@ def get_active_url():
 
 @st.cache_data(ttl=30, show_spinner=False)
 def get_backend_health():
-    last_err = "No connection"
+    errors = []
     for candidate in BACKEND_CANDIDATES:
         try:
             t0 = time.time()
-            res = requests.get(f"{candidate}/ready", timeout=2)
+            res = None
+            for p in ["/ready", "/api/ready"]:
+                try:
+                    res = requests.get(f"{candidate}{p}", timeout=1.2)
+                    if res.status_code in [200, 500, 502, 503]:
+                        break
+                except Exception:
+                    continue
+            
+            if res is None:
+                raise requests.exceptions.ConnectionError("Could not reach /ready or /api/ready")
+                
             latency = round((time.time() - t0) * 1000, 2)
             if res.status_code == 200:
                 data = res.json()
@@ -431,10 +473,23 @@ def get_backend_health():
                 data["active_url"] = candidate
                 return data
             elif res.status_code in [500, 502, 503]:
-                return {"status": "UNHEALTHY", "error": f"HTTP {res.status_code}", "latency_ms": latency, "active_url": candidate}
+                return {"status": "UNHEALTHY", "error": f"HTTP {res.status_code} from {candidate}", "latency_ms": latency, "active_url": candidate}
+            else:
+                errors.append(f"{candidate} (HTTP {res.status_code})")
         except Exception as e:
-            last_err = str(e)
-    return {"status": "OFFLINE", "error": last_err, "latency_ms": 0, "active_url": BACKEND_CANDIDATES[0]}
+            err_str = str(e)
+            if "NameResolutionError" in err_str or "gaierror" in err_str:
+                short_e = "DNS resolution failed (CoreDNS)"
+            elif "Connection refused" in err_str:
+                short_e = "Connection refused (port 5000)"
+            elif "timed out" in err_str or "Timeout" in err_str:
+                short_e = "Timeout (2s)"
+            else:
+                short_e = err_str.split(":")[-1].strip()
+            errors.append(f"{candidate} ({short_e})")
+            
+    err_summary = " | ".join(errors) if errors else "No candidate reachable"
+    return {"status": "OFFLINE", "error": err_summary, "latency_ms": 0, "active_url": BACKEND_CANDIDATES[0]}
 
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_jobs(base_url=None):

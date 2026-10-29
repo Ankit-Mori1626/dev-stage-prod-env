@@ -11,7 +11,7 @@ spec:
         - name: APP_ENV
           value: "stage"
         - name: BACKEND_URL
-          value: "http://backend-service.stage.svc.cluster.local:5000"
+          value: "http://backend-service:5000"
 ---
 apiVersion: apps/v1
 kind: Deployment
